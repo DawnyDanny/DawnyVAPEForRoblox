@@ -589,6 +589,205 @@ run(function()
 		Tooltip = 'Only attacks while swinging manually'
 	})
 end)
+
+run(function()
+	local KaidaKillaura
+	local Targets
+	local AttackRange
+	local UpdateRate
+	local MouseDown
+	local GUICheck
+	local ShowAnimation
+	local lastAttackTime = 0
+	local attackCooldown = 0.65
+	
+	KaidaKillaura = vape.Categories.Blatant:CreateModule({
+		Name = 'Kaida Killaura',
+		Function = function(callback)
+			
+			if callback then
+				if store.equippedKit ~= 'summoner' then
+					notif('Kaida Killaura', 'You need to be using Summoner kit!', 3, 'alert')
+					KaidaKillaura:Toggle()
+					return
+				end
+				
+				lastAttackTime = 0
+				
+				repeat
+					if not entitylib.isAlive then
+						task.wait(0.1)
+						continue
+					end
+					
+					if GUICheck.Enabled then
+						if bedwars.AppController:isLayerOpen(bedwars.UILayers.MAIN) then
+							task.wait(0.1)
+							continue
+						end
+					end
+					
+					local handItem = lplr.Character:FindFirstChild('HandInvItem')
+					local hasClaw = false
+					if handItem and handItem.Value then
+						local itemType = handItem.Value.Name
+						hasClaw = itemType:find('summoner_claw')
+					end
+					
+					if not hasClaw then
+						task.wait(0.1)
+						continue
+					end
+					
+					if MouseDown.Enabled then
+						local mousePressed = inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+						if not mousePressed then
+							task.wait(1.2)
+							continue
+						end
+					end
+					
+					if workspace:GetServerTimeNow() - lastAttackTime < 0.1 then
+						task.wait(0.05)
+						continue
+					end
+					
+					if (workspace:GetServerTimeNow() - lastAttackTime) < attackCooldown then
+						task.wait(0.1)
+						continue
+					end
+					
+					local plr = entitylib.EntityPosition({
+						Range = AttackRange.Value,
+						Part = 'RootPart',
+						Players = Targets.Players.Enabled,
+						NPCs = Targets.NPCs.Enabled,
+						Wallcheck = Targets.Walls.Enabled or nil
+					})
+					
+					if plr then
+						local localPosition = entitylib.character.RootPart.Position
+						local shootDir = CFrame.lookAt(localPosition, plr.RootPart.Position).LookVector
+						localPosition += shootDir * math.max((localPosition - plr.RootPart.Position).Magnitude - 16, 0)
+						
+						lastAttackTime = workspace:GetServerTimeNow()
+						
+						if ShowAnimation.Enabled then
+							pcall(function()
+								bedwars.AnimationUtil:playAnimation(lplr, bedwars.GameAnimationUtil:getAssetId(bedwars.AnimationType.SUMMONER_CHARACTER_SWIPE), {
+									looped = false
+								})
+							end)
+							
+							task.spawn(function()
+								pcall(function()
+									local clawModel = replicatedStorage.Assets.Misc.Kaida.Summoner_DragonClaw:Clone()
+									
+									if bedwars.KnightClient and bedwars.KnightClient.Controllers.SummonerKitSkinController then
+										if bedwars.KnightClient.Controllers.SummonerKitSkinController:isPrismaticSkin(lplr) then
+											bedwars.KnightClient.Controllers.SummonerKitSkinController:applyClawRGB(clawModel)
+										end
+									end
+									
+									clawModel.Parent = workspace
+									
+									if gameCamera.CFrame.Position and (gameCamera.CFrame.Position - entitylib.character.RootPart.Position).Magnitude < 1 then
+										for _, part in clawModel:GetDescendants() do
+											if part:IsA('MeshPart') then
+												part.Transparency = 0.6
+											end
+										end
+									end
+									
+									local rootPart = entitylib.character.RootPart
+									local Unit = Vector3.new(shootDir.X, 0, shootDir.Z).Unit
+									local startPos = rootPart.Position + Unit:Cross(Vector3.new(0, 1, 0)).Unit * -1 * 5 + Unit * 6
+									local direction = (startPos + shootDir * 13 - startPos).Unit
+									local cframe = CFrame.new(startPos, startPos + direction)
+									
+									clawModel:PivotTo(cframe)
+									clawModel.PrimaryPart.Anchored = true
+									
+									if clawModel:FindFirstChild('AnimationController') then
+										local animator = clawModel.AnimationController:FindFirstChildOfClass('Animator')
+										if animator then
+											bedwars.AnimationUtil:playAnimation(animator, bedwars.GameAnimationUtil:getAssetId(bedwars.AnimationType.SUMMONER_CLAW_ATTACK), {
+												looped = false,
+												speed = 1
+											})
+										end
+									end
+									
+									pcall(function()
+										local sounds = {
+											bedwars.SoundList.SUMMONER_CLAW_ATTACK_1,
+											bedwars.SoundList.SUMMONER_CLAW_ATTACK_2,
+											bedwars.SoundList.SUMMONER_CLAW_ATTACK_3,
+											bedwars.SoundList.SUMMONER_CLAW_ATTACK_4
+										}
+										bedwars.SoundManager:playSound(sounds[math.random(1, #sounds)], {
+											position = rootPart.Position
+										})
+									end)
+									
+									task.wait(0.75)
+									clawModel:Destroy()
+								end)
+							end)
+						end
+						
+						bedwars.Client:Get(remotes.SummonerClawAttack):SendToServer({
+							position = localPosition,
+							direction = shootDir,
+							clientTime = workspace:GetServerTimeNow()
+						})
+					end
+					
+					task.wait(1 / UpdateRate.Value)
+				until not KaidaKillaura.Enabled
+			end
+		end,
+		Tooltip = 'Auto attacks with Summoner claw'
+	})
+	
+	Targets = KaidaKillaura:CreateTargets({
+		Players = true,
+		NPCs = true,
+		Walls = true
+	})
+	
+	AttackRange = KaidaKillaura:CreateSlider({
+		Name = 'Attack Range',
+		Min = 1,
+		Max = 32,
+		Default = 22,
+		Suffix = function(val)
+			return val == 1 and 'stud' or 'studs'
+		end
+	})
+	
+	UpdateRate = KaidaKillaura:CreateSlider({
+		Name = 'Update Rate',
+		Min = 1,
+		Max = 120,
+		Default = 60,
+		Suffix = 'hz'
+	})
+	
+	MouseDown = KaidaKillaura:CreateToggle({
+		Name = 'Require Mouse Down',
+		Tooltip = 'Only attacks while holding left click'
+	})
+	
+	GUICheck = KaidaKillaura:CreateToggle({
+		Name = 'GUI Check'
+	})
+	
+	ShowAnimation = KaidaKillaura:CreateToggle({
+		Name = 'Show Animation',
+		Default = true
+	})
+end)
 	
 run(function()
 	local old
